@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111827">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PreisScanner">
+<title>PreisScanner</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f4f6;color:#111827;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",Arial,sans-serif}
+main{max-width:650px;margin:auto;padding:calc(16px + env(safe-area-inset-top)) 16px calc(30px + env(safe-area-inset-bottom))}
+h1{margin:0;font-size:30px}.sub{color:#6b7280;margin:5px 0 20px}.card{background:white;border-radius:20px;padding:18px;margin:12px 0;box-shadow:0 2px 12px #0000000a}
+button,input{font:inherit}button{min-height:48px;border:0;border-radius:14px;padding:12px 16px;font-weight:700}button.primary{background:#111827;color:white}button.secondary{background:#e5e7eb;color:#111827}button.danger{background:#fee2e2;color:#991b1b}
+input{min-height:48px;border:1px solid #d1d5db;border-radius:14px;padding:12px 14px;width:100%;outline:none}input:focus{border-color:#111827}
+.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1;min-width:130px}
+#videoWrap{display:none;position:relative;border-radius:18px;overflow:hidden;background:#000;margin-top:12px;aspect-ratio:4/3}
+#video{width:100%;height:100%;object-fit:cover}#scanLine{position:absolute;left:12%;right:12%;top:50%;height:2px;background:white;box-shadow:0 0 8px white}
+.status{margin-top:10px;padding:12px;border-radius:12px;background:#f3f4f6;font-size:14px}.hidden{display:none!important}
+.name{font-size:23px;font-weight:800}.price{font-size:46px;font-weight:900;margin:7px 0}.muted{color:#6b7280;font-size:14px}.empty{text-align:center;color:#6b7280;padding:20px}
+label{font-weight:700;display:block;margin:11px 0 7px}.product{display:flex;justify-content:space-between;gap:12px;padding:14px 0;border-bottom:1px solid #eee}.product:last-child{border:0}.small{min-height:40px;padding:8px 11px;font-size:14px}
+</style>
+</head>
+<body>
+<main>
+<h1>PreisScanner</h1>
+<p class="sub">Barcode scannen → Preis anzeigen → Preis ändern</p>
+
+<section class="card">
+<button id="start" class="primary" style="width:100%">📷 Barcode scannen</button>
+<div id="videoWrap"><video id="video" playsinline muted></video><div id="scanLine"></div></div>
+<div id="status" class="status hidden"></div>
+<button id="stop" class="secondary hidden" style="width:100%;margin-top:10px">Scanner schließen</button>
+</section>
+
+<section class="card">
+<label for="barcode">Barcode manuell eingeben</label>
+<div class="row"><input id="barcode" inputmode="numeric" placeholder="z. B. 4006381333931"><button id="search" class="secondary">Suchen</button></div>
+</section>
+
+<section id="result" class="card"><div class="empty">Noch kein Produkt ausgewählt.</div></section>
+
+<section class="card">
+<h2>Produkt hinzufügen</h2>
+<form id="form">
+<label for="nbarcode">Barcode</label><input id="nbarcode" inputmode="numeric" required>
+<label for="nname">Produktname</label><input id="nname" required placeholder="z. B. Coca-Cola 0,5 L">
+<label for="nprice">Preis in €</label><input id="nprice" inputmode="decimal" required placeholder="1,50">
+<button class="primary" style="width:100%;margin-top:14px">Produkt speichern</button>
+</form>
+</section>
+
+<section class="card"><h2>Produkte</h2><div id="list"></div></section>
+</main>
+
+<script>
+(()=> {
+const KEY="preisscanner_v2";
+let db=JSON.parse(localStorage.getItem(KEY)||"{}");
+const $=x=>document.getElementById(x);
+let stream=null, raf=null, detector=null, scanning=false;
+const money=n=>Number(n).toFixed(2).replace(".",",")+" €";
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+function save(){localStorage.setItem(KEY,JSON.stringify(db));render()}
+function render(){
+ const ks=Object.keys(db);
+ $("list").innerHTML=ks.length?ks.map(c=>`<div class="product"><div><b>${esc(db[c].name)}</b><div class="muted">${esc(c)}</div></div><div><b>${money(db[c].price)}</b><br><button class="secondary small" data-c="${esc(c)}">Ändern</button></div></div>`).join(""):'<div class="empty">Noch keine Produkte.</div>';
+ document.querySelectorAll("[data-c]").forEach(b=>b.onclick=()=>show(b.dataset.c));
+}
+function show(code){
+ code=String(code||"").trim();$("barcode").value=code;let p=db[code];
+ if(!p){$("result").innerHTML='<div class="name">Produkt nicht gefunden</div><p class="muted">Diesen Barcode gibt es noch nicht. Füge ihn unten mit Name und Preis hinzu.</p>';return}
+ $("result").innerHTML=`<div class="muted">Barcode: ${esc(code)}</div><div class="name">${esc(p.name)}</div><div class="price">${money(p.price)}</div><div class="row"><button id="edit" class="secondary">✏️ Preis ändern</button><button id="del" class="danger">🗑️ Löschen</button></div>`;
+ $("edit").onclick=()=>{let v=prompt("Neuer Preis in €:",String(p.price).replace(".",","));if(v===null)return;let n=Number(v.replace(",","."));if(!Number.isFinite(n)||n<0)return alert("Ungültiger Preis.");p.price=Math.round(n*100)/100;save();show(code)};
+ $("del").onclick=()=>{if(confirm("Produkt löschen?")){delete db[code];save();$("result").innerHTML='<div class="empty">Produkt gelöscht.</div>'}};
+}
+function stop(){
+ scanning=false;if(raf)cancelAnimationFrame(raf);raf=null;
+ if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;
+ $("video").srcObject=null;$("videoWrap").style.display="none";$("stop").classList.add("hidden");$("start").classList.remove("hidden");$("status").classList.add("hidden");
+}
+async function scanLoop(){
+ if(!scanning)return;
+ try{
+   if(detector && $("video").readyState>=2){
+     const codes=await detector.detect($("video"));
+     if(codes.length){show(codes[0].rawValue);stop();return}
+   }
+ }catch(e){}
+ raf=requestAnimationFrame(scanLoop);
+}
+async function start(){
+ if(!("BarcodeDetector" in window)){
+   $("status").classList.remove("hidden");
+   $("status").textContent="Dieser Browser stellt den integrierten BarcodeDetector nicht bereit. Die App braucht eine Scanner-Bibliothek für diesen Browser. Die manuelle Barcode-Eingabe funktioniert trotzdem.";
+   return;
+ }
+ try{
+   detector=new BarcodeDetector({formats:["ean_13","ean_8","upc_a","upc_e","code_128","code_39","itf","codabar","data_matrix","qr_code"]});
+   stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}},audio:false});
+   $("video").srcObject=stream;await $("video").play();scanning=true;
+   $("videoWrap").style.display="block";$("start").classList.add("hidden");$("stop").classList.remove("hidden");
+   $("status").classList.remove("hidden");$("status").textContent="Kamera aktiv. Halte den Barcode in die Mitte.";
+   scanLoop();
+ }catch(e){
+   $("status").classList.remove("hidden");$("status").textContent="Kamera konnte nicht gestartet werden. Bitte Safari-Kamerazugriff für diese Website erlauben und die HTTPS-Adresse verwenden.";
+   stop();
+ }
+}
+$("start").onclick=start;$("stop").onclick=stop;$("search").onclick=()=>show($("barcode").value);
+$("barcode").onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();show($("barcode").value)}};
+$("form").onsubmit=e=>{e.preventDefault();let c=$("nbarcode").value.trim(),n=$("nname").value.trim(),p=Number($("nprice").value.replace(",","."));if(!c||!n||!Number.isFinite(p)||p<0)return alert("Bitte alle Angaben korrekt eingeben.");db[c]={name:n,price:Math.round(p*100)/100};save();show(c);e.target.reset()};
+render();
+})();
+</script>
+</body>
+</html>
