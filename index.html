@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111827">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="PreisScanner">
+<link rel="manifest" href="manifest.webmanifest">
+<title>PreisScanner</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",Arial,sans-serif;color:#111827;background:#f2f3f5}
+*{box-sizing:border-box}body{margin:0;background:#f2f3f5}main{max-width:760px;margin:auto;padding:28px 18px 60px}h1{font-size:40px;margin:0 0 6px;font-weight:800;letter-spacing:-1px}h2{font-size:28px;margin:0 0 20px}.sub{font-size:20px;color:#6b7280;margin:0 0 24px}.card{background:#fff;border-radius:28px;padding:24px;margin:18px 0;box-shadow:0 3px 16px #00000008}.scanBtn{width:100%;border:0;border-radius:22px;background:#111827;color:#fff;font-size:21px;font-weight:800;padding:21px 18px;cursor:pointer}.scanBtn:active{transform:scale(.99)}button{font:inherit}.status{margin-top:16px;padding:16px;border-radius:18px;background:#f1f2f4;font-size:17px;line-height:1.4}.hidden{display:none!important}#reader{width:100%;margin-top:18px;border-radius:18px;overflow:hidden;background:#111}#reader video{border-radius:18px;object-fit:cover}.stop{width:100%;margin-top:12px;border:0;border-radius:16px;padding:15px;background:#e5e7eb;font-weight:700}.row{display:flex;gap:10px}.row>*{min-width:0;flex:1}input{width:100%;padding:16px;border:2px solid #d1d5db;border-radius:16px;font-size:18px;background:#fff}label{display:block;font-weight:700;font-size:16px;margin:0 0 8px}.field{margin:14px 0}.primary{border:0;border-radius:16px;background:#111827;color:#fff;padding:16px;font-weight:800;width:100%}.secondary{border:0;border-radius:16px;background:#e5e7eb;color:#111827;padding:16px;font-weight:800;width:100%}.danger{border:0;border-radius:16px;background:#fee2e2;color:#991b1b;padding:13px;font-weight:700}.product{border:1px solid #e5e7eb;border-radius:18px;padding:16px;margin:10px 0}.productTop{display:flex;justify-content:space-between;gap:12px}.price{font-size:23px;font-weight:800;white-space:nowrap}.barcode{color:#6b7280;font-size:14px;margin-top:5px;word-break:break-all}.empty{color:#6b7280;text-align:center;padding:15px}.ok{background:#dcfce7;color:#166534}.warn{background:#fef3c7;color:#92400e}.error{background:#fee2e2;color:#991b1b}
+.small{font-size:14px;color:#6b7280;line-height:1.45}.note{margin-top:12px}.toast{position:fixed;left:18px;right:18px;bottom:20px;background:#111827;color:white;padding:15px 18px;border-radius:16px;text-align:center;font-weight:700;z-index:99;box-shadow:0 8px 30px #0004}
+</style>
+</head>
+<body>
+<main>
+  <h1>PreisScanner</h1>
+  <p class="sub">Barcode scannen → Preis anzeigen → Preis ändern</p>
+
+  <section class="card">
+    <button class="scanBtn" id="startBtn">📷 Barcode scannen</button>
+    <div id="reader" class="hidden"></div>
+    <button class="stop hidden" id="stopBtn">Scanner schließen</button>
+    <div id="scanStatus" class="status hidden"></div>
+  </section>
+
+  <section class="card">
+    <h2>Barcode manuell eingeben</h2>
+    <div class="row">
+      <input id="searchBarcode" inputmode="numeric" autocomplete="off" placeholder="z. B. 4006381333931">
+      <button class="secondary" id="searchBtn">Suchen</button>
+    </div>
+  </section>
+
+  <section class="card" id="selectedCard">
+    <div class="empty">Noch kein Produkt ausgewählt.</div>
+  </section>
+
+  <section class="card">
+    <h2>Produkt hinzufügen</h2>
+    <div class="field"><label for="newBarcode">Barcode</label><input id="newBarcode" inputmode="numeric" placeholder="Barcode"></div>
+    <div class="field"><label for="newName">Produktname</label><input id="newName" placeholder="z. B. Cola 0,5 l"></div>
+    <div class="field"><label for="newPrice">Preis (€)</label><input id="newPrice" inputmode="decimal" placeholder="z. B. 2,50"></div>
+    <button class="primary" id="addBtn">Produkt speichern</button>
+  </section>
+
+  <section class="card">
+    <h2>Gespeicherte Produkte</h2>
+    <div id="products"></div>
+    <p class="small note">Die Preise werden auf diesem Gerät im Browser gespeichert. Es ist keine Internetverbindung nötig, nachdem die Seite geladen wurde – außer beim erstmaligen Laden der Scanner-Bibliothek.</p>
+  </section>
+</main>
+<div id="toast" class="toast hidden"></div>
+
+<!-- Scanner library. Two CDNs are used as fallback. -->
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+if(typeof Html5Qrcode==='undefined'){
+  var s=document.createElement('script');
+  s.src='https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
+  s.onerror=function(){document.getElementById('scanStatus').textContent='Die Scanner-Bibliothek konnte nicht geladen werden. Bitte Internetverbindung prüfen.';document.getElementById('scanStatus').className='status error';document.getElementById('scanStatus').classList.remove('hidden');};
+  document.head.appendChild(s);
+}
+</script>
+<script>
+const KEY='preisscanner_v3';
+let products=JSON.parse(localStorage.getItem(KEY)||'{}');
+let selectedBarcode=null;
+let scanner=null;
+let scanning=false;
+let lastCode='';
+let lastTime=0;
+
+const $=id=>document.getElementById(id);
+function save(){localStorage.setItem(KEY,JSON.stringify(products)); renderProducts();}
+function money(v){return Number(v).toFixed(2).replace('.',',')+' €';}
+function toast(msg){$('toast').textContent=msg;$('toast').classList.remove('hidden');setTimeout(()=>$('toast').classList.add('hidden'),2200)}
+function normalize(v){return String(v||'').trim().replace(/\s+/g,'');}
+function showStatus(msg,type=''){const e=$('scanStatus');e.textContent=msg;e.className='status '+type;e.classList.remove('hidden');}
+function selectProduct(code){
+  code=normalize(code); selectedBarcode=code;
+  const p=products[code]; const card=$('selectedCard');
+  if(!p){card.innerHTML='<div class="empty">Barcode <b>'+escapeHtml(code)+'</b> wurde noch nicht gespeichert.<br><br>Du kannst ihn unten als neues Produkt anlegen.</div>'; $('newBarcode').value=code; return;}
+  card.innerHTML=`<h2>${escapeHtml(p.name||'Produkt')}</h2>
+    <div class="small">Barcode: ${escapeHtml(code)}</div>
+    <div class="field"><label>Preis (€)</label><input id="editPrice" inputmode="decimal" value="${String(p.price).replace('.',',')}"></div>
+    <div class="row"><button class="primary" id="savePrice">Preis speichern</button><button class="danger" id="deleteProduct">Löschen</button></div>`;
+  $('savePrice').onclick=()=>{let x=parseFloat($('editPrice').value.replace(',','.'));if(!Number.isFinite(x)){toast('Ungültiger Preis');return;}products[code].price=x;save();selectProduct(code);toast('Preis gespeichert');};
+  $('deleteProduct').onclick=()=>{if(confirm('Produkt wirklich löschen?')){delete products[code];save();selectedBarcode=null;card.innerHTML='<div class="empty">Produkt gelöscht.</div>';}};
+}
+function renderProducts(){
+ const el=$('products'); const arr=Object.entries(products);
+ if(!arr.length){el.innerHTML='<div class="empty">Noch keine Produkte gespeichert.</div>';return;}
+ el.innerHTML=arr.map(([code,p])=>`<div class="product"><div class="productTop"><div><b>${escapeHtml(p.name||'Produkt')}</b><div class="barcode">${escapeHtml(code)}</div></div><div class="price">${money(p.price)}</div></div><button class="secondary" style="margin-top:10px" data-code="${escapeHtml(code)}">Bearbeiten</button></div>`).join('');
+ el.querySelectorAll('[data-code]').forEach(b=>b.onclick=()=>selectProduct(b.dataset.code));
+}
+function escapeHtml(s){return String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+
+async function startScanner(){
+ if(scanning)return;
+ if(typeof Html5Qrcode==='undefined'){showStatus('Scanner wird noch geladen. Bitte 1–2 Sekunden warten und erneut drücken.','warn');return;}
+ $('reader').classList.remove('hidden'); $('stopBtn').classList.remove('hidden'); $('startBtn').disabled=true;
+ showStatus('Kamera wird geöffnet …');
+ try{
+   scanner=new Html5Qrcode('reader',{verbose:false});
+   const formats=[];
+   const F=window.Html5QrcodeSupportedFormats||{};
+   ['EAN_13','EAN_8','UPC_A','UPC_E','CODE_128','CODE_39','ITF','CODABAR','QR_CODE'].forEach(x=>{if(F[x]!==undefined)formats.push(F[x]);});
+   const config={fps:12,qrbox:function(viewfinderWidth,viewfinderHeight){const size=Math.floor(Math.min(viewfinderWidth,viewfinderHeight)*0.72);return {width:size,height:Math.min(size,180)};},aspectRatio:1.7778};
+   if(formats.length)config.formatsToSupport=formats;
+   await scanner.start({facingMode:{exact:'environment'}},config,onScanSuccess,onScanFailure);
+   scanning=true;showStatus('Kamera läuft. Halte den Barcode in den Rahmen.','ok');
+ }catch(e){
+   console.error(e);
+   try{
+     if(scanner){await scanner.clear();}
+     scanner=new Html5Qrcode('reader',{verbose:false});
+     await scanner.start({facingMode:'environment'}, {fps:10,qrbox:250},onScanSuccess,onScanFailure);
+     scanning=true;showStatus('Kamera läuft. Halte den Barcode in den Rahmen.','ok');
+   }catch(e2){console.error(e2);showStatus('Kamera konnte nicht gestartet werden. In iPhone: Einstellungen → Apps → Safari → Kamera → Erlauben. Danach Safari neu öffnen.','error');await stopScanner();}
+ }
+}
+function onScanFailure(){/* normal: no barcode in current frame */}
+function onScanSuccess(decodedText){
+ const code=normalize(decodedText); const now=Date.now();
+ if(!code || (code===lastCode && now-lastTime<2500))return;
+ lastCode=code;lastTime=now;
+ selectProduct(code);showStatus('Barcode erkannt: '+code,'ok');toast(products[code]?'Produkt gefunden':'Neuer Barcode – Produkt anlegen');
+ setTimeout(()=>stopScanner(),250);
+}
+async function stopScanner(){
+ $('stopBtn').classList.add('hidden');$('startBtn').disabled=false;
+ if(scanner){try{if(scanning)await scanner.stop();}catch(e){}try{await scanner.clear();}catch(e){}}
+ scanner=null;scanning=false;$('reader').classList.add('hidden');
+}
+$('startBtn').onclick=startScanner;$('stopBtn').onclick=stopScanner;
+$('searchBtn').onclick=()=>{const c=normalize($('searchBarcode').value);if(!c){toast('Barcode eingeben');return;}selectProduct(c);};
+$('searchBarcode').addEventListener('keydown',e=>{if(e.key==='Enter')$('searchBtn').click()});
+$('addBtn').onclick=()=>{
+ const code=normalize($('newBarcode').value), name=$('newName').value.trim(), price=parseFloat($('newPrice').value.replace(',','.'));
+ if(!code||!name||!Number.isFinite(price)){toast('Bitte Barcode, Produktname und Preis ausfüllen');return;}
+ products[code]={name,price};save();selectProduct(code);$('newBarcode').value='';$('newName').value='';$('newPrice').value='';toast('Produkt gespeichert');
+};
+renderProducts();
+</script>
+</body>
+</html>
