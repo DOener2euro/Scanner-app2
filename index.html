@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111827">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="PreisScanner">
+<link rel="manifest" href="manifest.webmanifest">
+<title>PreisScanner</title>
+<style>
+*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",Arial,sans-serif;background:#f3f4f6;color:#111827}
+main{max-width:620px;margin:auto;padding:calc(16px + env(safe-area-inset-top)) 16px calc(28px + env(safe-area-inset-bottom))}
+h1{font-size:30px;margin:0 0 6px}.sub{color:#6b7280;margin:0 0 20px}.card{background:#fff;border-radius:20px;padding:18px;margin:12px 0;box-shadow:0 2px 12px #0000000b}
+button,input{font:inherit}button{border:0;border-radius:14px;padding:14px 16px;font-weight:700;cursor:pointer}button.primary{background:#111827;color:#fff}button.secondary{background:#e5e7eb;color:#111827}button.danger{background:#fee2e2;color:#991b1b}.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1;min-width:120px}input{width:100%;padding:14px;border:1px solid #d1d5db;border-radius:14px;background:#fff;outline:none}input:focus{border-color:#111827}
+#reader{width:100%;overflow:hidden;border-radius:18px;background:#111;min-height:260px;display:none}#reader video{width:100%;display:block}.hidden{display:none!important}
+.price{font-size:44px;font-weight:800;margin:6px 0}.name{font-size:22px;font-weight:750}.muted{color:#6b7280;font-size:14px}.status{padding:12px;border-radius:12px;background:#f3f4f6;margin-top:12px;font-size:14px}
+.product{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:14px 0;border-bottom:1px solid #eee}.product:last-child{border-bottom:0}.actions{display:flex;gap:7px}.small{padding:10px 12px;font-size:14px}
+label{display:block;font-weight:700;margin:10px 0 7px}.empty{color:#6b7280;text-align:center;padding:20px}
+</style>
+</head>
+<body>
+<main>
+<h1>PreisScanner</h1>
+<p class="sub">Barcode scannen → Preis anzeigen → Preis ändern.</p>
+
+<section class="card">
+  <button id="scanBtn" class="primary" style="width:100%">📷 Barcode scannen</button>
+  <div id="reader"></div>
+  <div id="cameraStatus" class="status hidden"></div>
+  <button id="stopBtn" class="secondary hidden" style="width:100%;margin-top:10px">Scanner schließen</button>
+</section>
+
+<section class="card">
+  <label for="barcode">Barcode manuell eingeben</label>
+  <div class="row">
+    <input id="barcode" inputmode="numeric" autocomplete="off" placeholder="z. B. 4006381333931">
+    <button id="searchBtn" class="secondary">Suchen</button>
+  </div>
+</section>
+
+<section id="result" class="card">
+  <div class="empty">Noch kein Produkt gescannt.</div>
+</section>
+
+<section class="card">
+<h2>Produkt hinzufügen</h2>
+<form id="addForm">
+<label for="newBarcode">Barcode</label>
+<input id="newBarcode" inputmode="numeric" required>
+<label for="newName">Produktname</label>
+<input id="newName" required placeholder="z. B. Coca-Cola 0,5 L">
+<label for="newPrice">Preis in €</label>
+<input id="newPrice" inputmode="decimal" required placeholder="1,50">
+<button class="primary" style="width:100%;margin-top:14px">Produkt speichern</button>
+</form>
+</section>
+
+<section class="card">
+<h2>Gespeicherte Produkte</h2>
+<div id="list"></div>
+</section>
+</main>
+
+<script src="https://unpkg.com/@zxing/browser@0.1.5/umd/index.min.js"></script>
+<script>
+const KEY="preisscanner_products_v1";
+let products=JSON.parse(localStorage.getItem(KEY)||"{}");
+let controls=null;
+const $=id=>document.getElementById(id);
+const money=n=>Number(n).toFixed(2).replace(".",",")+" €";
+function save(){localStorage.setItem(KEY,JSON.stringify(products));renderList()}
+function show(code){
+  code=String(code||"").trim();
+  $("barcode").value=code;
+  const p=products[code];
+  if(!p){$("result").innerHTML='<div class="name">Produkt nicht gefunden</div><p class="muted">Diesen Barcode gibt es noch nicht. Du kannst ihn unten hinzufügen.</p>';return}
+  $("result").innerHTML=`<div class="muted">Barcode: ${esc(code)}</div><div class="name">${esc(p.name)}</div><div class="price">${money(p.price)}</div><div class="row"><button id="editPrice" class="secondary">✏️ Preis ändern</button><button id="deleteProduct" class="danger">🗑️ Löschen</button></div>`;
+  $("editPrice").onclick=()=>{let v=prompt("Neuer Preis in €:",String(p.price).replace(".",","));if(v===null)return;let n=Number(v.replace(",","."));if(!Number.isFinite(n)||n<0){alert("Ungültiger Preis.");return}p.price=Math.round(n*100)/100;save();show(code)};
+  $("deleteProduct").onclick=()=>{if(confirm("Produkt wirklich löschen?")){delete products[code];save();$("result").innerHTML='<div class="empty">Produkt gelöscht.</div>'}};
+}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function renderList(){
+ const keys=Object.keys(products);
+ if(!keys.length){$("list").innerHTML='<div class="empty">Noch keine Produkte gespeichert.</div>';return}
+ $("list").innerHTML=keys.map(code=>{let p=products[code];return `<div class="product"><div><b>${esc(p.name)}</b><div class="muted">${esc(code)}</div></div><div style="text-align:right"><b>${money(p.price)}</b><div class="actions"><button class="secondary small" data-edit="${esc(code)}">Ändern</button></div></div></div>`}).join("");
+ document.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>show(b.dataset.edit));
+}
+async function startScanner(){
+ $("reader").style.display="block";$("scanBtn").classList.add("hidden");$("stopBtn").classList.remove("hidden");
+ $("cameraStatus").classList.remove("hidden");$("cameraStatus").textContent="Kamera wird gestartet …";
+ try{
+   if(!window.ZXingBrowser) throw new Error("Scanner-Bibliothek nicht geladen.");
+   const reader=new ZXingBrowser.BrowserMultiFormatReader();
+   controls=await reader.decodeFromConstraints({video:{facingMode:{ideal:"environment"}},audio:false},$("reader"),(result,err)=>{
+     if(result){show(result.getText());stopScanner();}
+   });
+   $("cameraStatus").textContent="Kamera aktiv – Barcode in den Rahmen halten.";
+ }catch(e){
+   $("cameraStatus").textContent="Kamera konnte nicht gestartet werden. Prüfe, ob du die Seite über HTTPS geöffnet und den Kamerazugriff erlaubt hast.";
+ }
+}
+function stopScanner(){try{if(controls)controls.stop()}catch(e){}controls=null;$("reader").innerHTML="";$("reader").style.display="none";$("scanBtn").classList.remove("hidden");$("stopBtn").classList.add("hidden");$("cameraStatus").classList.add("hidden")}
+$("scanBtn").onclick=startScanner;$("stopBtn").onclick=stopScanner;
+$("searchBtn").onclick=()=>show($("barcode").value);
+$("barcode").onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();show($("barcode").value)}};
+$("addForm").onsubmit=e=>{e.preventDefault();let code=$("newBarcode").value.trim(),name=$("newName").value.trim(),price=Number($("newPrice").value.replace(",","."));if(!code||!name||!Number.isFinite(price)||price<0){alert("Bitte alle Angaben korrekt eingeben.");return}products[code]={name,price:Math.round(price*100)/100};save();show(code);e.target.reset()};
+renderList();
+</script>
+</body>
+</html>
